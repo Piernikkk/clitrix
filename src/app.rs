@@ -1,4 +1,6 @@
+use crate::data::MatrixService;
 use crate::screens::Screen;
+use crate::screens::chat::ChatScreenState;
 
 #[derive(Debug)]
 pub struct AppState {
@@ -6,6 +8,8 @@ pub struct AppState {
     pub login_form: LoginForm,
     pub profile: Profile,
     pub logged_in: bool,
+    pub matrix_service: MatrixService,
+    pub chat_state: ChatScreenState,
 }
 
 impl Default for AppState {
@@ -15,6 +19,8 @@ impl Default for AppState {
             login_form: LoginForm::default(),
             profile: Profile::default(),
             logged_in: false,
+            matrix_service: MatrixService::new(),
+            chat_state: ChatScreenState::default(),
         }
     }
 }
@@ -156,10 +162,11 @@ impl AppState {
         self.current_screen = screen;
     }
 
-    pub fn login_success(&mut self) {
+    pub fn login_success(&mut self, user: crate::data::User) {
         self.logged_in = true;
         self.profile.username = self.login_form.username.clone();
         self.profile.homeserver = self.login_form.homeserver.clone();
+        self.chat_state = ChatScreenState::default().with_user(user);
         self.current_screen = Screen::Chat;
     }
 
@@ -167,6 +174,8 @@ impl AppState {
         self.logged_in = false;
         self.profile = Profile::default();
         self.login_form.clear();
+        self.matrix_service = MatrixService::new();
+        self.chat_state = ChatScreenState::default();
         self.current_screen = Screen::Login;
     }
 }

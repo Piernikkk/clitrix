@@ -221,9 +221,27 @@ impl ScreenHandler for LoginScreen {
                 }
                 KeyCode::Enter => {
                     app_state.login_form.editing = false;
-                    // TODO: Trigger login attempt
-                    // For now, just switch to chat screen as placeholder
-                    Some(Screen::Chat)
+                    // Trigger dummy login attempt
+                    if app_state.login_form.is_valid() {
+                        // In a real implementation, this would be async
+                        // For now, simulate successful login
+                        let user = crate::data::User {
+                            user_id: format!(
+                                "@{}:{}",
+                                app_state.login_form.username, app_state.login_form.homeserver
+                            ),
+                            display_name: Some(app_state.login_form.username.clone()),
+                            avatar_url: None,
+                            presence: crate::data::UserPresence::Online,
+                        };
+                        app_state.matrix_service.current_user = Some(user.clone());
+                        app_state.matrix_service.is_authenticated = true;
+                        app_state.login_success(user);
+                        Some(Screen::Chat)
+                    } else {
+                        // Stay on login screen if form is invalid
+                        Some(Screen::Login)
+                    }
                 }
                 KeyCode::Tab => {
                     if key.modifiers.contains(KeyModifiers::SHIFT) {
@@ -279,9 +297,28 @@ impl ScreenHandler for LoginScreen {
                         match c {
                             'c' => None, // Quit
                             'l' => {
-                                // TODO: Trigger login attempt
-                                // For now, just switch to chat screen as placeholder
-                                Some(Screen::Chat)
+                                // Trigger dummy login attempt
+                                if app_state.login_form.is_valid() {
+                                    // In a real implementation, this would be async
+                                    // For now, simulate successful login
+                                    let user = crate::data::User {
+                                        user_id: format!(
+                                            "@{}:{}",
+                                            app_state.login_form.username,
+                                            app_state.login_form.homeserver
+                                        ),
+                                        display_name: Some(app_state.login_form.username.clone()),
+                                        avatar_url: None,
+                                        presence: crate::data::UserPresence::Online,
+                                    };
+                                    app_state.matrix_service.current_user = Some(user.clone());
+                                    app_state.matrix_service.is_authenticated = true;
+                                    app_state.login_success(user);
+                                    Some(Screen::Chat)
+                                } else {
+                                    // Stay on login screen if form is invalid
+                                    Some(Screen::Login)
+                                }
                             }
                             _ => Some(Screen::Login),
                         }

@@ -24,6 +24,6 @@ pub trait ScreenHandler {
 pub fn get_screen_handler(screen: &Screen) -> Box<dyn ScreenHandler> {
     match screen {
         Screen::Login => Box::new(login::LoginScreen),
-        Screen::Chat => Box::new(chat::ChatScreen::default()),
+        Screen::Chat => Box::new(chat::ChatScreen),
     }
 }
