@@ -26,11 +26,10 @@ pub trait ScreenHandler {
     -> Option<Screen>;
 }
 
-// Keep this function for backward compatibility if needed
 pub fn get_screen_handler(screen: &Screen) -> Box<dyn ScreenHandler> {
     match screen {
         Screen::Login => Box::new(login::LoginScreen),
         Screen::Chat => Box::new(chat::ChatScreen),
-        Screen::HomeserverSelect => Box::new(homeserver_select::HomeserverSelectScreen::default()),
+        Screen::HomeserverSelect => Box::new(homeserver_select::HomeserverSelectScreen::new()),
     }
 }

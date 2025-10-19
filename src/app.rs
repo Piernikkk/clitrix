@@ -5,6 +5,22 @@ use crate::screens::login::LoginForm;
 use crate::screens::{
     ScreenHandler, chat::ChatScreen, homeserver_select::HomeserverSelectScreen, login::LoginScreen,
 };
+use crate::ui::input_handler::TextInputState;
+
+#[derive(Debug)]
+pub struct HomeserverScreenState {
+    pub value: TextInputState,
+    pub invalid: bool,
+}
+
+impl Default for HomeserverScreenState {
+    fn default() -> Self {
+        Self {
+            value: TextInputState::new("matrix.org".to_string()),
+            invalid: false,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct AppState {
@@ -15,7 +31,7 @@ pub struct AppState {
     pub logged_in: bool,
     pub matrix_service: MatrixService,
     pub chat_state: ChatScreenState,
-    pub homeserver_screen: HomeserverSelectScreen,
+    pub homeserver_screen: HomeserverScreenState,
     pub login_screen: LoginScreen,
     pub chat_screen: ChatScreen,
 }
@@ -30,7 +46,7 @@ impl Default for AppState {
             matrix_service: MatrixService::new(),
             chat_state: ChatScreenState::default(),
             homeserver: String::from("matrix.org"),
-            homeserver_screen: HomeserverSelectScreen::default(),
+            homeserver_screen: HomeserverScreenState::default(),
             login_screen: LoginScreen,
             chat_screen: ChatScreen,
         }
@@ -57,71 +73,6 @@ impl Default for Profile {
 impl AppState {
     pub fn set_screen(&mut self, screen: Screen) {
         self.current_screen = screen;
-    }
-
-    pub fn render_current_screen(&self, frame: &mut ratatui::Frame) {
-        match self.current_screen {
-            Screen::Login => self.login_screen.render(frame, self),
-            Screen::Chat => self.chat_screen.render(frame, self),
-            Screen::HomeserverSelect => self.homeserver_screen.render(frame, self),
-        }
-    }
-
-    pub async fn handle_current_screen_key_event(
-        &mut self,
-        key: ratatui::crossterm::event::KeyEvent,
-    ) -> Option<Screen> {
-        match self.current_screen {
-            Screen::Login => {
-                // Handle login screen using separate method to avoid borrowing issues
-                let result = self
-                    .login_screen
-                    .handle_key_event_with_deps(key, &mut self.login_form)
-                    .await;
-
-                // Update app state based on result
-                if matches!(result, Some(Screen::Chat)) {
-                    // Simulate successful login
-                    let user = crate::data::User {
-                        user_id: format!(
-                            "@{}:{}",
-                            self.login_form.username.value, self.login_form.homeserver.value
-                        ),
-                        display_name: Some(self.login_form.username.value.clone()),
-                        avatar_url: None,
-                        presence: crate::data::UserPresence::Online,
-                    };
-                    self.matrix_service.current_user = Some(user.clone());
-                    self.matrix_service.is_authenticated = true;
-                    self.login_success(user);
-                }
-
-                result
-            }
-            Screen::Chat => {
-                // Placeholder - just handle basic navigation for now
-                use ratatui::crossterm::event::KeyCode;
-                match key.code {
-                    KeyCode::Esc => Some(Screen::Login),
-                    _ => Some(Screen::Chat),
-                }
-            }
-            Screen::HomeserverSelect => {
-                // Handle homeserver screen using separate method to avoid borrowing issues
-                let result = self
-                    .homeserver_screen
-                    .handle_key_event_with_deps(key, &self.matrix_service)
-                    .await;
-
-                // Update app state based on result
-                if matches!(result, Some(Screen::Login)) {
-                    self.login_form.homeserver = self.homeserver_screen.value.clone();
-                    self.homeserver = self.homeserver_screen.value.value.clone();
-                }
-
-                result
-            }
-        }
     }
 
     pub fn login_success(&mut self, user: crate::data::User) {

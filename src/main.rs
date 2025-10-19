@@ -10,6 +10,7 @@ use ratatui::{
 };
 
 use crate::app::AppState;
+use crate::screens::get_screen_handler;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -25,15 +26,18 @@ async fn main() -> Result<()> {
 
 async fn run(mut terminal: DefaultTerminal, app_state: &mut AppState) -> Result<()> {
     loop {
+        // Get the current screen handler
+        let mut screen_handler = get_screen_handler(&app_state.current_screen);
+
         // Render the current screen
         terminal.draw(|frame| {
-            app_state.render_current_screen(frame);
+            screen_handler.render(frame, app_state);
         })?;
 
         // Handle input events
         if let Event::Key(key) = event::read()? {
             // Let the current screen handle the key event
-            match app_state.handle_current_screen_key_event(key).await {
+            match screen_handler.handle_key_event(key, app_state).await {
                 Some(new_screen) => {
                     app_state.set_screen(new_screen);
                 }
