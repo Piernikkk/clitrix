@@ -3,13 +3,14 @@ use ratatui::{
     crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
     layout::{Constraint, Direction, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::Line,
     widgets::{Block, Borders, Clear, Paragraph},
 };
 
 use crate::{
     app::AppState,
     screens::{Screen, ScreenHandler},
+    ui::text_input::TextInput,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -22,6 +23,25 @@ pub enum LoginField {
 impl Default for LoginField {
     fn default() -> Self {
         LoginField::Username
+    }
+}
+
+impl LoginField {
+    fn to_index(&self) -> usize {
+        match self {
+            LoginField::Username => 0,
+            LoginField::Password => 1,
+            LoginField::Homeserver => 2,
+        }
+    }
+
+    fn from_index(index: usize) -> Self {
+        match index {
+            0 => LoginField::Username,
+            1 => LoginField::Password,
+            2 => LoginField::Homeserver,
+            _ => LoginField::Username,
+        }
     }
 }
 
@@ -38,18 +58,14 @@ impl LoginScreen {
 
     fn get_field_placeholder(&self, field: &LoginField) -> &'static str {
         match field {
-            LoginField::Username => "@username:matrix.org",
+            LoginField::Username => "@username",
             LoginField::Password => "Enter your password",
             LoginField::Homeserver => "matrix.org",
         }
     }
 
     fn get_field_value<'a>(&self, field: &LoginField, app_state: &'a AppState) -> &'a str {
-        match field {
-            LoginField::Username => &app_state.login_form.username,
-            LoginField::Password => &app_state.login_form.password,
-            LoginField::Homeserver => &app_state.login_form.homeserver,
-        }
+        app_state.login_form.get_field_value(field.to_index())
     }
 
     fn render_field_input(
@@ -64,89 +80,19 @@ impl LoginScreen {
         let title = self.get_field_title(field);
         let placeholder = self.get_field_placeholder(field);
 
-        // Create display text (mask password)
-        let display_text = if matches!(field, LoginField::Password) && !value.is_empty() {
-            "*".repeat(value.len())
-        } else if value.is_empty() {
-            placeholder.to_string()
+        let cursor_pos = app_state.login_form.get_field_cursor(field.to_index());
+
+        let text_input = if matches!(field, LoginField::Password) {
+            TextInput::password_field(value, cursor_pos, title, placeholder)
+                .focused(is_active)
+                .editing(app_state.login_form.editing && is_active)
+        } else if is_active && app_state.login_form.editing {
+            TextInput::editable(value, cursor_pos, title, placeholder)
         } else {
-            value.to_string()
+            TextInput::new(value, cursor_pos, title, placeholder).focused(is_active)
         };
 
-        // Style based on whether this field is active
-        let border_style = if is_active {
-            Style::default().fg(Color::Yellow)
-        } else {
-            Style::default().fg(Color::Gray)
-        };
-
-        let text_style = if value.is_empty() {
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::ITALIC)
-        } else if matches!(field, LoginField::Password) {
-            Style::default().fg(Color::White)
-        } else {
-            Style::default().fg(Color::White)
-        };
-
-        // Show cursor if this field is active and in editing mode
-        let mut spans = vec![Span::styled(display_text, text_style)];
-
-        if is_active && app_state.login_form.editing {
-            if matches!(field, LoginField::Password) {
-                // For password, just show cursor at end
-                spans.push(Span::styled("▌", Style::default().fg(Color::Yellow)));
-            } else {
-                // For other fields, show cursor at actual position
-                spans.clear();
-                let cursor_pos = match field {
-                    LoginField::Username => app_state.login_form.username_cursor,
-                    LoginField::Homeserver => app_state.login_form.homeserver_cursor,
-                    _ => 0,
-                };
-
-                if value.is_empty() {
-                    spans.push(Span::styled(
-                        placeholder,
-                        Style::default()
-                            .fg(Color::DarkGray)
-                            .add_modifier(Modifier::ITALIC),
-                    ));
-                    if cursor_pos == 0 {
-                        spans.insert(0, Span::styled("▌", Style::default().fg(Color::Yellow)));
-                    }
-                } else {
-                    if cursor_pos == 0 {
-                        spans.push(Span::styled("▌", Style::default().fg(Color::Yellow)));
-                        spans.push(Span::styled(value, Style::default().fg(Color::White)));
-                    } else if cursor_pos >= value.len() {
-                        spans.push(Span::styled(value, Style::default().fg(Color::White)));
-                        spans.push(Span::styled("▌", Style::default().fg(Color::Yellow)));
-                    } else {
-                        let before = &value[..cursor_pos];
-                        let at_cursor = value.chars().nth(cursor_pos).unwrap_or(' ');
-                        let after = &value[cursor_pos + 1..];
-
-                        spans.push(Span::styled(before, Style::default().fg(Color::White)));
-                        spans.push(Span::styled(
-                            at_cursor.to_string(),
-                            Style::default().bg(Color::Yellow).fg(Color::Black),
-                        ));
-                        spans.push(Span::styled(after, Style::default().fg(Color::White)));
-                    }
-                }
-            }
-        }
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .title(title)
-            .border_style(border_style);
-
-        let paragraph = Paragraph::new(Line::from(spans)).block(block);
-
-        frame.render_widget(paragraph, area);
+        frame.render_widget(text_input, area);
     }
 
     fn center_rect(&self, percent_x: u16, percent_y: u16, area: Rect) -> Rect {
@@ -210,12 +156,14 @@ impl ScreenHandler for LoginScreen {
             .split(inner_area);
 
         // Render form fields
+        let active_field = LoginField::from_index(app_state.login_form.active_field);
+
         self.render_field_input(
             frame,
             chunks[0],
             &LoginField::Username,
             app_state,
-            app_state.login_form.active_field == LoginField::Username,
+            active_field == LoginField::Username,
         );
 
         self.render_field_input(
@@ -223,7 +171,7 @@ impl ScreenHandler for LoginScreen {
             chunks[1],
             &LoginField::Password,
             app_state,
-            app_state.login_form.active_field == LoginField::Password,
+            active_field == LoginField::Password,
         );
 
         self.render_field_input(
@@ -231,7 +179,7 @@ impl ScreenHandler for LoginScreen {
             chunks[2],
             &LoginField::Homeserver,
             app_state,
-            app_state.login_form.active_field == LoginField::Homeserver,
+            active_field == LoginField::Homeserver,
         );
 
         // Instructions
