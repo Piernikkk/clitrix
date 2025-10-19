@@ -73,12 +73,30 @@ impl AppState {
     ) -> Option<Screen> {
         match self.current_screen {
             Screen::Login => {
-                // Placeholder - just handle basic navigation for now
-                use ratatui::crossterm::event::KeyCode;
-                match key.code {
-                    KeyCode::Esc => None,
-                    _ => Some(Screen::Login),
+                // Handle login screen using separate method to avoid borrowing issues
+                let result = self
+                    .login_screen
+                    .handle_key_event_with_deps(key, &mut self.login_form)
+                    .await;
+
+                // Update app state based on result
+                if matches!(result, Some(Screen::Chat)) {
+                    // Simulate successful login
+                    let user = crate::data::User {
+                        user_id: format!(
+                            "@{}:{}",
+                            self.login_form.username.value, self.login_form.homeserver.value
+                        ),
+                        display_name: Some(self.login_form.username.value.clone()),
+                        avatar_url: None,
+                        presence: crate::data::UserPresence::Online,
+                    };
+                    self.matrix_service.current_user = Some(user.clone());
+                    self.matrix_service.is_authenticated = true;
+                    self.login_success(user);
                 }
+
+                result
             }
             Screen::Chat => {
                 // Placeholder - just handle basic navigation for now
