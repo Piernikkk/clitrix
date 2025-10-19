@@ -1,3 +1,4 @@
+pub mod chat;
 pub mod homeserver_select;
 pub mod login;
 
@@ -10,6 +11,7 @@ use crate::app::AppState;
 pub enum Screen {
     HomeServerSelect,
     Login,
+    Chat,
 }
 
 impl Default for Screen {
@@ -29,5 +31,6 @@ pub fn get_screen_handler(screen: &Screen) -> Box<dyn ScreenHandler> {
     match screen {
         Screen::HomeServerSelect => Box::new(homeserver_select::HomeserverSelectScreen::new()),
         Screen::Login => Box::new(login::LoginScreen),
+        Screen::Chat => Box::new(chat::ChatScreen::new()),
     }
 }

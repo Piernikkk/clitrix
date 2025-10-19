@@ -12,7 +12,6 @@ use ratatui::{
 
 use crate::{
     app::AppState,
-    matrix_service::MatrixService,
     screens::{Screen, ScreenHandler},
     ui::text_input::{TextInput, input_handler::TextInputState},
 };
@@ -180,15 +179,43 @@ impl ScreenHandler for LoginScreen {
 
                     match login {
                         Ok(_) => {
-                            state.login_screen.invalid = None;
+                            state.login_screen.invalid = Some(format!("Loading data, please wait"));
+
+                            // Sync to get initial room data
+                            if let Err(e) = state.matrix_service.sync_once().await {
+                                state.login_screen.invalid = Some(format!("❌ Sync failed: {}", e));
+                                return Some(Screen::Login);
+                            }
+
+                            // Load rooms
+                            match state.matrix_service.get_rooms().await {
+                                Ok(rooms) => {
+                                    state.chat_screen.rooms = rooms;
+
+                                    // Load messages for first room if available
+                                    if let Some(room) = state.chat_screen.rooms.first() {
+                                        let room_id = room.room_id.clone();
+                                        if let Ok(messages) =
+                                            state.matrix_service.get_messages(&room_id, 100).await
+                                        {
+                                            state.chat_screen.messages = messages;
+                                        }
+                                    }
+
+                                    return Some(Screen::Chat);
+                                }
+                                Err(e) => {
+                                    state.login_screen.invalid =
+                                        Some(format!("❌ Failed to load rooms: {}", e));
+                                    return Some(Screen::Login);
+                                }
+                            }
                         }
                         Err(err) => {
                             state.login_screen.invalid = Some(format!("❌ Login failed: {}", err));
                             return Some(Screen::Login);
                         }
                     }
-
-                    Some(Screen::Login)
                 }
             }
             _ => {

@@ -1,7 +1,10 @@
 use color_eyre::{Result, eyre::eyre};
-use matrix_sdk::Client;
+use matrix_sdk::{
+    Client, RoomState,
+    ruma::{OwnedRoomId, events::room::message::RoomMessageEventContent},
+};
 
-use crate::models::user::User;
+use crate::models::{message::Message, room::Room, user::User};
 
 #[derive(Debug, Clone)]
 pub struct MatrixService {
@@ -108,6 +111,89 @@ impl MatrixService {
         });
 
         self.client = Some(client);
+
+        Ok(())
+    }
+
+    pub async fn get_rooms(&self) -> Result<Vec<Room>> {
+        let client = match &self.client {
+            Some(client) => client,
+            None => return Err(eyre!("Client is not initialized")),
+        };
+
+        let mut rooms = Vec::new();
+
+        for room in client.rooms() {
+            if room.state() == RoomState::Joined {
+                let room_id = room.room_id().to_owned();
+                let display_name = room.display_name().await.ok().map(|n| n.to_string());
+                let is_direct = room.is_direct().await.ok().unwrap_or(false);
+
+                // Get last message (simplified)
+                let last_message = None;
+
+                let unread_count = room
+                    .unread_notification_counts()
+                    .notification_count
+                    .try_into()
+                    .unwrap_or(0);
+
+                rooms.push(Room {
+                    room_id,
+                    display_name,
+                    avatar_url: None,
+                    last_message,
+                    unread_count,
+                    is_encrypted: false,
+                    is_direct,
+                });
+            }
+        }
+
+        Ok(rooms)
+    }
+
+    pub async fn sync_once(&self) -> Result<()> {
+        let client = match &self.client {
+            Some(client) => client,
+            None => return Err(eyre!("Client is not initialized")),
+        };
+
+        client.sync_once(Default::default()).await?;
+        Ok(())
+    }
+
+    pub async fn get_messages(&self, room_id: &OwnedRoomId, _limit: u32) -> Result<Vec<Message>> {
+        let client = match &self.client {
+            Some(client) => client,
+            None => return Err(eyre!("Client is not initialized")),
+        };
+
+        let _room = client
+            .get_room(room_id)
+            .ok_or_else(|| eyre!("Room not found"))?;
+
+        // TODO: Implement proper message fetching using Matrix SDK timeline API
+        // For now, return empty messages list
+        // The timeline API requires more complex setup with proper sync and state management
+
+        let messages = Vec::new();
+
+        Ok(messages)
+    }
+
+    pub async fn send_message(&self, room_id: &OwnedRoomId, message: &str) -> Result<()> {
+        let client = match &self.client {
+            Some(client) => client,
+            None => return Err(eyre!("Client is not initialized")),
+        };
+
+        let room = client
+            .get_room(room_id)
+            .ok_or_else(|| eyre!("Room not found"))?;
+
+        let content = RoomMessageEventContent::text_plain(message);
+        room.send(content).await?;
 
         Ok(())
     }
