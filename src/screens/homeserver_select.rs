@@ -142,7 +142,12 @@ impl ScreenHandler for HomeserverSelectScreen {
                     )
                     .await
                     {
-                        Ok(_) => Some(Screen::Login),
+                        Ok(_) => {
+                            state
+                                .matrix_service
+                                .set_homeserver(&state.homeserver_select_screen.text_input.value);
+                            Some(Screen::Login)
+                        }
                         Err(err) => {
                             state.homeserver_select_screen.invalid =
                                 Some(format!("❌ Invalid homeserver: {}", err));

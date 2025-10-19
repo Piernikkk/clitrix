@@ -3,7 +3,7 @@ use std::rc::Rc;
 use async_trait::async_trait;
 use ratatui::{
     Frame,
-    crossterm::event::KeyCode,
+    crossterm::event::{KeyCode, KeyEvent},
     layout::{Constraint, Direction, Flex, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::Line,
@@ -148,11 +148,7 @@ impl ScreenHandler for LoginScreen {
         frame.render_widget(instructions_paragraph, chunks[3]);
     }
 
-    async fn handle_key_event(
-        &mut self,
-        key: ratatui::crossterm::event::KeyEvent,
-        state: &mut crate::app::AppState,
-    ) -> Option<crate::screens::Screen> {
+    async fn handle_key_event(&mut self, key: KeyEvent, state: &mut AppState) -> Option<Screen> {
         match key.code {
             KeyCode::Esc => None,
             KeyCode::Tab => {
@@ -174,6 +170,24 @@ impl ScreenHandler for LoginScreen {
                     state.login_screen.invalid = Some("❌ Password cannot be empty.".to_string());
                     Some(Screen::Login)
                 } else {
+                    let login = state
+                        .matrix_service
+                        .login(
+                            &state.login_screen.username.value,
+                            &state.login_screen.password.value,
+                        )
+                        .await;
+
+                    match login {
+                        Ok(_) => {
+                            state.login_screen.invalid = None;
+                        }
+                        Err(err) => {
+                            state.login_screen.invalid = Some(format!("❌ Login failed: {}", err));
+                            return Some(Screen::Login);
+                        }
+                    }
+
                     Some(Screen::Login)
                 }
             }

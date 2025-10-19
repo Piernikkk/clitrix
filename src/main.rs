@@ -1,5 +1,6 @@
 mod app;
 pub mod matrix_service;
+pub mod models;
 mod screens;
 mod ui;
 

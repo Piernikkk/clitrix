@@ -1,18 +1,32 @@
 use color_eyre::{Result, eyre::eyre};
 use matrix_sdk::Client;
 
+use crate::models::user::User;
+
 #[derive(Debug, Clone)]
 pub struct MatrixService {
     pub homeserver_url: Option<String>,
-    pub user_id: Option<String>,
+    pub user: Option<User>,
+    pub client: Option<Client>,
 }
 
 impl MatrixService {
     pub fn new() -> Self {
         Self {
             homeserver_url: None,
-            user_id: None,
+            user: None,
+            client: None,
         }
+    }
+
+    pub fn set_homeserver(&mut self, homeserver: &str) {
+        let homeserver_url =
+            if homeserver.starts_with("http://") || homeserver.starts_with("https://") {
+                homeserver.to_string()
+            } else {
+                format!("https://{}", homeserver)
+            };
+        self.homeserver_url = Some(homeserver_url);
     }
 
     pub async fn check_homeserver(homeserver: &str) -> Result<()> {
@@ -64,5 +78,37 @@ impl MatrixService {
             }
             Err(e) => Err(eyre!("Failed to create client for homeserver: {}", e)),
         }
+    }
+    pub async fn login(&mut self, username: &str, password: &str) -> Result<()> {
+        let homeserver_url = match &self.homeserver_url {
+            Some(url) => url,
+            None => return Err(eyre!("Homeserver URL is not set")),
+        };
+
+        let client = Client::builder()
+            .homeserver_url(homeserver_url)
+            .build()
+            .await
+            .map_err(|e| eyre!("Failed to create Matrix client: {}", e))?;
+
+        let response = client
+            .matrix_auth()
+            .login_username(username, password)
+            .initial_device_display_name("Clitrix")
+            .await?;
+
+        self.user = Some(User {
+            user_id: response.user_id.to_string(),
+            device_id: response.device_id,
+            access_token: response.access_token,
+            refresh_token: response.refresh_token,
+            expires_in: response.expires_in,
+            display_name: None,
+            avatar_url: None,
+        });
+
+        self.client = Some(client);
+
+        Ok(())
     }
 }
