@@ -1,21 +1,20 @@
-pub mod chat;
 pub mod homeserver_select;
 pub mod login;
 
-use crate::app::AppState;
 use async_trait::async_trait;
 use ratatui::{Frame, crossterm::event::KeyEvent};
 
-#[derive(Debug, Clone, PartialEq)]
+use crate::app::AppState;
+
+#[derive(Clone, Debug)]
 pub enum Screen {
+    HomeServerSelect,
     Login,
-    Chat,
-    HomeserverSelect,
 }
 
 impl Default for Screen {
     fn default() -> Self {
-        Screen::HomeserverSelect
+        Screen::HomeServerSelect
     }
 }
 
@@ -28,8 +27,7 @@ pub trait ScreenHandler {
 
 pub fn get_screen_handler(screen: &Screen) -> Box<dyn ScreenHandler> {
     match screen {
+        Screen::HomeServerSelect => Box::new(homeserver_select::HomeserverSelectScreen::new()),
         Screen::Login => Box::new(login::LoginScreen),
-        Screen::Chat => Box::new(chat::ChatScreen),
-        Screen::HomeserverSelect => Box::new(homeserver_select::HomeserverSelectScreen::new()),
     }
 }

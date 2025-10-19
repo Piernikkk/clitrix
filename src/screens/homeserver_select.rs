@@ -1,6 +1,7 @@
+use async_trait::async_trait;
 use ratatui::{
     Frame,
-    crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
+    crossterm::event::{KeyCode, KeyEvent},
     layout::{Constraint, Direction, Flex, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::Line,
@@ -9,28 +10,52 @@ use ratatui::{
 
 use crate::{
     app::AppState,
+    matrix_service::MatrixService,
     screens::{Screen, ScreenHandler},
-    ui::text_input::TextInput,
+    ui::text_input::{TextInput, input_handler::TextInputState},
 };
-use async_trait::async_trait;
 
-#[derive(Debug, Default)]
+struct Colors {
+    border: Color,
+    error_msg: Color,
+    controls_title: Color,
+}
+
+const COLORS: Colors = Colors {
+    border: Color::Cyan,
+    error_msg: Color::Red,
+    controls_title: Color::Green,
+};
+
 pub struct HomeserverSelectScreen;
+
+#[derive(Debug)]
+pub struct HomeserverSelectState {
+    text_input: TextInputState,
+    invalid: Option<String>,
+}
+
+impl Default for HomeserverSelectState {
+    fn default() -> Self {
+        Self {
+            text_input: TextInputState::new("matrix.org".to_string(), true),
+            invalid: None,
+        }
+    }
+}
 
 impl HomeserverSelectScreen {
     pub fn new() -> Self {
         Self
     }
-
-    fn render_homeserver_input(&self, frame: &mut Frame, area: Rect, app_state: &AppState) {
-        let title = "Homeserver";
-        let placeholder = "Enter homeserver URL (e.g., matrix.org)";
-
-        let text_input = TextInput::editable(
-            &app_state.homeserver_screen.value.value,
-            app_state.homeserver_screen.value.cursor_position,
-            title,
-            placeholder,
+    fn render_homeserver_input(&self, frame: &mut Frame, area: Rect, state: &AppState) {
+        let text_input = TextInput::new(
+            &state.homeserver_select_screen.text_input.value,
+            state.homeserver_select_screen.text_input.cursor_position,
+            "Homeserver",
+            "Enter your homeserver URL (e.g., matrix.org)",
+            false,
+            state.homeserver_select_screen.text_input.is_focused,
         );
 
         frame.render_widget(text_input, area);
@@ -39,27 +64,31 @@ impl HomeserverSelectScreen {
 
 #[async_trait]
 impl ScreenHandler for HomeserverSelectScreen {
-    fn render(&self, frame: &mut Frame, app_state: &AppState) {
+    fn render(&self, frame: &mut Frame, state: &AppState) {
         frame.render_widget(Clear, frame.area());
 
-        let form_area = Layout::default()
+        let form_container = Layout::default()
             .direction(Direction::Vertical)
             .flex(Flex::Center)
-            .constraints([Constraint::Length(15)])
-            .split(frame.area())[0];
+            .constraints([Constraint::Length(12)])
+            .split(frame.area())[0]
+            .inner(Margin {
+                horizontal: 10,
+                vertical: 0,
+            });
 
         let main_block = Block::default()
             .borders(Borders::ALL)
             .title("Homeserver Selection")
             .title_style(
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(COLORS.border)
                     .add_modifier(Modifier::BOLD),
             );
 
-        frame.render_widget(main_block, form_area);
+        frame.render_widget(main_block, form_container);
 
-        let inner_area = form_area.inner(Margin {
+        let content = form_container.inner(Margin {
             horizontal: 2,
             vertical: 1,
         });
@@ -69,28 +98,22 @@ impl ScreenHandler for HomeserverSelectScreen {
             .constraints([
                 Constraint::Length(3), // Homeserver input
                 Constraint::Length(1), // Error message
-                Constraint::Length(4), // Instructions
-                Constraint::Min(0),    // Remaining space
+                Constraint::Length(5), // Instructions
             ])
-            .split(inner_area);
+            .split(content);
 
-        // Render homeserver input
-        self.render_homeserver_input(frame, chunks[0], app_state);
+        self.render_homeserver_input(frame, chunks[0], state);
 
-        // Show validation error if invalid
-        if app_state.homeserver_screen.invalid {
-            let error_msg =
-                Paragraph::new("❌ Invalid homeserver. Please check the URL and try again.")
-                    .style(Style::default().fg(Color::Red));
+        if state.homeserver_select_screen.invalid.is_some() {
+            let error_msg = Paragraph::new(state.homeserver_select_screen.invalid.clone().unwrap())
+                .style(Style::default().fg(COLORS.error_msg));
             frame.render_widget(error_msg, chunks[1]);
         }
 
-        // Instructions
         let instructions = vec![
             Line::from("Type to edit homeserver URL"),
             Line::from("Enter - Validate and continue"),
             Line::from("ESC - Exit application"),
-            Line::from("Type characters to edit the homeserver URL"),
         ];
 
         let instructions_paragraph = Paragraph::new(instructions)
@@ -98,59 +121,49 @@ impl ScreenHandler for HomeserverSelectScreen {
                 Block::default()
                     .borders(Borders::ALL)
                     .title("Controls")
-                    .title_style(Style::default().fg(Color::Green)),
+                    .title_style(Style::default().fg(COLORS.controls_title)),
             )
             .style(Style::default().fg(Color::Gray));
 
         frame.render_widget(instructions_paragraph, chunks[2]);
     }
 
-    async fn handle_key_event(
-        &mut self,
-        key: KeyEvent,
-        app_state: &mut AppState,
-    ) -> Option<Screen> {
+    async fn handle_key_event(&mut self, key: KeyEvent, state: &mut AppState) -> Option<Screen> {
         match key.code {
             KeyCode::Esc => None,
             KeyCode::Enter => {
-                if !app_state.homeserver_screen.value.value.is_empty() {
-                    match app_state
-                        .matrix_service
-                        .check_homeserver(&app_state.homeserver_screen.value.value)
-                        .await
+                if state.homeserver_select_screen.text_input.value.is_empty() {
+                    state.homeserver_select_screen.invalid =
+                        Some("❌ Homeserver URL cannot be empty.".to_string());
+                    Some(Screen::HomeServerSelect)
+                } else {
+                    match MatrixService::check_homeserver(
+                        &state.homeserver_select_screen.text_input.value,
+                    )
+                    .await
                     {
-                        Ok(true) => {
-                            // Update app state when homeserver is valid
-                            app_state.login_form.homeserver =
-                                app_state.homeserver_screen.value.clone();
-                            app_state.homeserver = app_state.homeserver_screen.value.value.clone();
-                            app_state.homeserver_screen.invalid = false;
-                            Some(Screen::Login)
-                        }
-                        Ok(false) | Err(_) => {
-                            app_state.homeserver_screen.invalid = true;
-                            Some(Screen::HomeserverSelect)
+                        Ok(_) => Some(Screen::Login),
+                        Err(err) => {
+                            state.homeserver_select_screen.invalid =
+                                Some(format!("❌ Invalid homeserver: {}", err));
+                            Some(Screen::HomeServerSelect)
                         }
                     }
-                } else {
-                    app_state.homeserver_screen.invalid = true;
-                    Some(Screen::HomeserverSelect)
                 }
             }
             _ => {
-                // Use TextInputState's built-in key handling
-                let handled = app_state.homeserver_screen.value.handle_key_event(key);
-
-                if handled {
-                    app_state.homeserver_screen.invalid = false; // Clear error when user starts typing
-                    Some(Screen::HomeserverSelect)
-                } else {
-                    // Handle keys that TextInputState doesn't handle
-                    match key.code {
-                        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => None,
-                        _ => Some(Screen::HomeserverSelect),
+                if state.homeserver_select_screen.text_input.is_focused {
+                    if state
+                        .homeserver_select_screen
+                        .text_input
+                        .handle_key_event(key)
+                        == true
+                    {
+                        state.homeserver_select_screen.invalid = None;
                     }
                 }
+
+                Some(Screen::HomeServerSelect)
             }
         }
     }
