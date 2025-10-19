@@ -10,122 +10,100 @@ use ratatui::{
 use crate::{
     app::AppState,
     screens::{Screen, ScreenHandler},
-    ui::text_input::TextInput,
+    ui::{input_handler::TextInputState, text_input::TextInput},
 };
-use async_trait::async_trait;
 
 #[derive(Debug)]
 pub struct LoginForm {
-    pub username: String,
-    pub password: String,
-    pub homeserver: String,
-    pub active_field: usize, // Index-based field selection
+    pub username: TextInputState,
+    pub password: TextInputState,
+    pub homeserver: TextInputState,
+    pub active_field: LoginField,
     pub editing: bool,
-    pub username_cursor: usize,
-    pub password_cursor: usize,
-    pub homeserver_cursor: usize,
 }
 
 impl Default for LoginForm {
     fn default() -> Self {
         Self {
-            username: String::new(),
-            password: String::new(),
-            homeserver: String::from("matrix.org"),
-            active_field: 0, // Start with username field
+            username: TextInputState::default(),
+            password: TextInputState::default(),
+            homeserver: TextInputState::new("matrix.org".to_string()),
+            active_field: LoginField::Username,
             editing: false,
-            username_cursor: 0,
-            password_cursor: 0,
-            homeserver_cursor: 10, // Position after "matrix.org"
         }
     }
 }
 
 impl LoginForm {
     pub fn next_field(&mut self) {
-        self.active_field = (self.active_field + 1) % 3;
-    }
-
-    pub fn previous_field(&mut self) {
-        self.active_field = if self.active_field == 0 {
-            2
-        } else {
-            self.active_field - 1
+        self.active_field = match self.active_field {
+            LoginField::Username => LoginField::Password,
+            LoginField::Password => LoginField::Homeserver,
+            LoginField::Homeserver => LoginField::Username,
         };
     }
 
-    pub fn get_field_value(&self, field_index: usize) -> &str {
-        match field_index {
-            0 => &self.username,
-            1 => &self.password,
-            2 => &self.homeserver,
-            _ => "",
+    pub fn previous_field(&mut self) {
+        self.active_field = match self.active_field {
+            LoginField::Username => LoginField::Homeserver,
+            LoginField::Password => LoginField::Username,
+            LoginField::Homeserver => LoginField::Password,
+        };
+    }
+
+    pub fn get_active_field_mut(&mut self) -> &mut TextInputState {
+        match self.active_field {
+            LoginField::Username => &mut self.username,
+            LoginField::Password => &mut self.password,
+            LoginField::Homeserver => &mut self.homeserver,
         }
     }
 
-    pub fn get_field_cursor(&self, field_index: usize) -> usize {
-        match field_index {
-            0 => self.username_cursor,
-            1 => self.password_cursor,
-            2 => self.homeserver_cursor,
-            _ => 0,
-        }
-    }
-
-    pub fn get_field_mut(&mut self, field_index: usize) -> Option<(&mut String, &mut usize)> {
-        match field_index {
-            0 => Some((&mut self.username, &mut self.username_cursor)),
-            1 => Some((&mut self.password, &mut self.password_cursor)),
-            2 => Some((&mut self.homeserver, &mut self.homeserver_cursor)),
-            _ => None,
-        }
-    }
-
-    pub fn enter_char(&mut self, c: char) {
-        if let Some((value, cursor)) = self.get_field_mut(self.active_field) {
-            value.insert(*cursor, c);
-            *cursor += 1;
-        }
-    }
-
-    pub fn delete_char(&mut self) {
-        if let Some((value, cursor)) = self.get_field_mut(self.active_field) {
-            if *cursor > 0 {
-                value.remove(*cursor - 1);
-                *cursor -= 1;
-            }
-        }
-    }
-
-    pub fn move_cursor_left(&mut self) {
-        if let Some((_, cursor)) = self.get_field_mut(self.active_field) {
-            if *cursor > 0 {
-                *cursor -= 1;
-            }
-        }
-    }
-
-    pub fn move_cursor_right(&mut self) {
-        if let Some((value, cursor)) = self.get_field_mut(self.active_field) {
-            if *cursor < value.len() {
-                *cursor += 1;
-            }
+    pub fn get_field_mut(&mut self, field: &LoginField) -> &mut TextInputState {
+        match field {
+            LoginField::Username => &mut self.username,
+            LoginField::Password => &mut self.password,
+            LoginField::Homeserver => &mut self.homeserver,
         }
     }
 
     pub fn clear(&mut self) {
         self.username.clear();
         self.password.clear();
-        self.homeserver = String::from("matrix.org");
-        self.username_cursor = 0;
-        self.password_cursor = 0;
-        self.homeserver_cursor = 10;
-        self.active_field = 0;
+        self.homeserver.set_value("matrix.org".to_string());
+        self.active_field = LoginField::Username;
         self.editing = false;
     }
 
     pub fn is_valid(&self) -> bool {
-        !self.username.is_empty() && !self.password.is_empty() && !self.homeserver.is_empty()
+        !self.username.value.is_empty()
+            && !self.password.value.is_empty()
+            && !self.homeserver.value.is_empty()
+    }
+
+    pub fn is_homeserver_valid(&self) -> bool {
+        !self.homeserver.value.is_empty()
+    }
+
+    pub fn get_homeserver_error(&self) -> Option<&'static str> {
+        if self.homeserver.value.is_empty() {
+            Some("Homeserver cannot be empty")
+        } else {
+            None
+        }
+    }
+
+    pub async fn validate_homeserver_async(
+        &self,
+        matrix_service: &crate::data::MatrixService,
+    ) -> Result<bool, String> {
+        match matrix_service
+            .check_homeserver(&self.homeserver.value)
+            .await
+        {
+            Ok(valid) => Ok(valid),
+            Err(e) => Err(e.to_string()),
+        }
     }
 }
 
@@ -142,25 +120,7 @@ impl Default for LoginField {
     }
 }
 
-impl LoginField {
-    fn to_index(&self) -> usize {
-        match self {
-            LoginField::Username => 0,
-            LoginField::Password => 1,
-            LoginField::Homeserver => 2,
-        }
-    }
-
-    fn from_index(index: usize) -> Self {
-        match index {
-            0 => LoginField::Username,
-            1 => LoginField::Password,
-            2 => LoginField::Homeserver,
-            _ => LoginField::Username,
-        }
-    }
-}
-
+#[derive(Debug)]
 pub struct LoginScreen;
 
 impl LoginScreen {
@@ -180,8 +140,16 @@ impl LoginScreen {
         }
     }
 
-    fn get_field_value<'a>(&self, field: &LoginField, app_state: &'a AppState) -> &'a str {
-        app_state.login_form.get_field_value(field.to_index())
+    fn get_field_state<'a>(
+        &self,
+        field: &LoginField,
+        app_state: &'a AppState,
+    ) -> &'a TextInputState {
+        match field {
+            LoginField::Username => &app_state.login_form.username,
+            LoginField::Password => &app_state.login_form.password,
+            LoginField::Homeserver => &app_state.login_form.homeserver,
+        }
     }
 
     fn render_field_input(
@@ -192,20 +160,34 @@ impl LoginScreen {
         app_state: &AppState,
         is_active: bool,
     ) {
-        let value = self.get_field_value(field, app_state);
+        let field_state = self.get_field_state(field, app_state);
         let title = self.get_field_title(field);
         let placeholder = self.get_field_placeholder(field);
 
-        let cursor_pos = app_state.login_form.get_field_cursor(field.to_index());
-
         let text_input = if matches!(field, LoginField::Password) {
-            TextInput::password_field(value, cursor_pos, title, placeholder)
-                .focused(is_active)
-                .editing(app_state.login_form.editing && is_active)
+            TextInput::password_field(
+                &field_state.value,
+                field_state.cursor_position,
+                title,
+                placeholder,
+            )
+            .focused(is_active)
+            .editing(app_state.login_form.editing && is_active)
         } else if is_active && app_state.login_form.editing {
-            TextInput::editable(value, cursor_pos, title, placeholder)
+            TextInput::editable(
+                &field_state.value,
+                field_state.cursor_position,
+                title,
+                placeholder,
+            )
         } else {
-            TextInput::new(value, cursor_pos, title, placeholder).focused(is_active)
+            TextInput::new(
+                &field_state.value,
+                field_state.cursor_position,
+                title,
+                placeholder,
+            )
+            .focused(is_active)
         };
 
         frame.render_widget(text_input, area);
@@ -232,7 +214,7 @@ impl LoginScreen {
     }
 }
 
-#[async_trait]
+#[async_trait::async_trait]
 impl ScreenHandler for LoginScreen {
     fn render(&self, frame: &mut Frame, app_state: &AppState) {
         // Clear the entire area
@@ -273,14 +255,12 @@ impl ScreenHandler for LoginScreen {
             .split(inner_area);
 
         // Render form fields
-        let active_field = LoginField::from_index(app_state.login_form.active_field);
-
         self.render_field_input(
             frame,
             chunks[0],
             &LoginField::Username,
             app_state,
-            active_field == LoginField::Username,
+            app_state.login_form.active_field == LoginField::Username,
         );
 
         self.render_field_input(
@@ -288,7 +268,7 @@ impl ScreenHandler for LoginScreen {
             chunks[1],
             &LoginField::Password,
             app_state,
-            active_field == LoginField::Password,
+            app_state.login_form.active_field == LoginField::Password,
         );
 
         self.render_field_input(
@@ -296,7 +276,7 @@ impl ScreenHandler for LoginScreen {
             chunks[2],
             &LoginField::Homeserver,
             app_state,
-            active_field == LoginField::Homeserver,
+            app_state.login_form.active_field == LoginField::Homeserver,
         );
 
         // Instructions
@@ -349,9 +329,10 @@ impl ScreenHandler for LoginScreen {
                         let user = crate::data::User {
                             user_id: format!(
                                 "@{}:{}",
-                                app_state.login_form.username, app_state.login_form.homeserver
+                                app_state.login_form.username.value,
+                                app_state.login_form.homeserver.value
                             ),
-                            display_name: Some(app_state.login_form.username.clone()),
+                            display_name: Some(app_state.login_form.username.value.clone()),
                             avatar_url: None,
                             presence: crate::data::UserPresence::Online,
                         };
@@ -372,30 +353,21 @@ impl ScreenHandler for LoginScreen {
                     }
                     Some(Screen::Login)
                 }
-                KeyCode::Char(c) => {
-                    if key.modifiers.contains(KeyModifiers::CONTROL) {
-                        match c {
-                            'c' => None, // Quit
+                _ => {
+                    // Let the active text input handle the key event
+                    let active_field = app_state.login_form.get_active_field_mut();
+                    if active_field.handle_key_event(key) {
+                        Some(Screen::Login)
+                    } else {
+                        // If text input didn't handle it, check for global shortcuts
+                        match key.code {
+                            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                                None
+                            }
                             _ => Some(Screen::Login),
                         }
-                    } else {
-                        app_state.login_form.enter_char(c);
-                        Some(Screen::Login)
                     }
                 }
-                KeyCode::Backspace => {
-                    app_state.login_form.delete_char();
-                    Some(Screen::Login)
-                }
-                KeyCode::Left => {
-                    app_state.login_form.move_cursor_left();
-                    Some(Screen::Login)
-                }
-                KeyCode::Right => {
-                    app_state.login_form.move_cursor_right();
-                    Some(Screen::Login)
-                }
-                _ => Some(Screen::Login),
             }
         } else {
             // Handle navigation mode
@@ -425,10 +397,12 @@ impl ScreenHandler for LoginScreen {
                                     let user = crate::data::User {
                                         user_id: format!(
                                             "@{}:{}",
-                                            app_state.login_form.username,
-                                            app_state.login_form.homeserver
+                                            app_state.login_form.username.value,
+                                            app_state.login_form.homeserver.value
                                         ),
-                                        display_name: Some(app_state.login_form.username.clone()),
+                                        display_name: Some(
+                                            app_state.login_form.username.value.clone(),
+                                        ),
                                         avatar_url: None,
                                         presence: crate::data::UserPresence::Online,
                                     };

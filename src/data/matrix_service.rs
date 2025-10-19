@@ -1,7 +1,7 @@
 use crate::data::models::*;
 
 use color_eyre::eyre::{Result, eyre};
-use matrix_sdk::{Client, ServerName};
+use matrix_sdk::Client;
 use tokio::time::{Duration, sleep};
 use url::Url;
 
@@ -49,17 +49,17 @@ impl MatrixService {
         };
 
         // Extract host for ServerName validation
-        let host_with_port = if let Some(port) = parsed_url.port() {
-            format!("{}:{}", parsed_url.host_str().unwrap_or(""), port)
-        } else {
-            parsed_url.host_str().unwrap_or("").to_string()
-        };
+        // let host_with_port = if let Some(port) = parsed_url.port() {
+        //     format!("{}:{}", parsed_url.host_str().unwrap_or(""), port)
+        // } else {
+        //     parsed_url.host_str().unwrap_or("").to_string()
+        // };
 
         // Parse the server name using matrix-sdk
-        let server_name = match ServerName::parse(&host_with_port) {
-            Ok(name) => name,
-            Err(_) => return Err(eyre!("Invalid Matrix homeserver format")),
-        };
+        // let server_name = match ServerName::parse(&host_with_port) {
+        //     Ok(name) => name,
+        //     Err(_) => return Err(eyre!("Invalid Matrix homeserver format")),
+        // };
 
         // Create a temporary client to test the homeserver
         match Client::builder()

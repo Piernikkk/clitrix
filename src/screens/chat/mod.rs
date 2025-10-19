@@ -15,6 +15,7 @@ use async_trait::async_trait;
 pub use chat_state::{ChatFocus, ChatScreenState};
 pub use room_chat_layout::RoomChatLayout;
 
+#[derive(Debug)]
 pub struct ChatScreen;
 
 impl ChatScreen {
