@@ -10,6 +10,7 @@ use crate::{
     app::AppState,
     screens::{Screen, ScreenHandler},
 };
+use async_trait::async_trait;
 
 pub use chat_state::{ChatFocus, ChatScreenState};
 pub use room_chat_layout::RoomChatLayout;
@@ -413,6 +414,7 @@ impl ChatScreen {
     }
 }
 
+#[async_trait]
 impl ScreenHandler for ChatScreen {
     fn render(&self, frame: &mut Frame, app_state: &AppState) {
         // Load dummy data if rooms are empty (first time)
@@ -428,7 +430,11 @@ impl ScreenHandler for ChatScreen {
         layout.render(frame, &app_state.chat_state);
     }
 
-    fn handle_key_event(&self, key: KeyEvent, app_state: &mut AppState) -> Option<Screen> {
+    async fn handle_key_event(
+        &mut self,
+        key: KeyEvent,
+        app_state: &mut AppState,
+    ) -> Option<Screen> {
         // Load dummy rooms on first access
         if app_state.chat_state.rooms.is_empty() {
             self.load_dummy_rooms(app_state);

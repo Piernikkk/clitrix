@@ -7,6 +7,7 @@ use crate::screens::login::LoginForm;
 pub struct AppState {
     pub current_screen: Screen,
     pub login_form: LoginForm,
+    pub homeserver: String,
     pub profile: Profile,
     pub logged_in: bool,
     pub matrix_service: MatrixService,
@@ -22,6 +23,7 @@ impl Default for AppState {
             logged_in: false,
             matrix_service: MatrixService::new(),
             chat_state: ChatScreenState::default(),
+            homeserver: String::from("matrix.org"),
         }
     }
 }

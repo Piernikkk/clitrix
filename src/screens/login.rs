@@ -12,6 +12,7 @@ use crate::{
     screens::{Screen, ScreenHandler},
     ui::text_input::TextInput,
 };
+use async_trait::async_trait;
 
 #[derive(Debug)]
 pub struct LoginForm {
@@ -231,6 +232,7 @@ impl LoginScreen {
     }
 }
 
+#[async_trait]
 impl ScreenHandler for LoginScreen {
     fn render(&self, frame: &mut Frame, app_state: &AppState) {
         // Clear the entire area
@@ -326,7 +328,11 @@ impl ScreenHandler for LoginScreen {
         frame.render_widget(instructions_paragraph, chunks[4]);
     }
 
-    fn handle_key_event(&self, key: KeyEvent, app_state: &mut AppState) -> Option<Screen> {
+    async fn handle_key_event(
+        &mut self,
+        key: KeyEvent,
+        app_state: &mut AppState,
+    ) -> Option<Screen> {
         if app_state.login_form.editing {
             // Handle editing mode
             match key.code {

@@ -1,6 +1,9 @@
 use crate::data::models::*;
 
+use color_eyre::eyre::{Result, eyre};
+use matrix_sdk::{Client, ServerName};
 use tokio::time::{Duration, sleep};
+use url::Url;
 
 /// Dummy Matrix service that provides mock data and placeholder functions
 /// Replace these implementations with actual Matrix SDK calls
@@ -24,6 +27,78 @@ impl Default for MatrixService {
 impl MatrixService {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub async fn check_homeserver(&self, homeserver: &str) -> Result<bool> {
+        if homeserver.is_empty() {
+            return Err(eyre!("Homeserver cannot be empty"));
+        }
+
+        // Normalize the homeserver URL - construct proper URL format
+        let homeserver_url =
+            if homeserver.starts_with("http://") || homeserver.starts_with("https://") {
+                homeserver.to_string()
+            } else {
+                format!("https://{}", homeserver)
+            };
+
+        // Parse and validate the URL first
+        let parsed_url = match Url::parse(&homeserver_url) {
+            Ok(url) => url,
+            Err(_) => return Err(eyre!("Invalid homeserver URL format")),
+        };
+
+        // Extract host for ServerName validation
+        let host_with_port = if let Some(port) = parsed_url.port() {
+            format!("{}:{}", parsed_url.host_str().unwrap_or(""), port)
+        } else {
+            parsed_url.host_str().unwrap_or("").to_string()
+        };
+
+        // Parse the server name using matrix-sdk
+        let server_name = match ServerName::parse(&host_with_port) {
+            Ok(name) => name,
+            Err(_) => return Err(eyre!("Invalid Matrix homeserver format")),
+        };
+
+        // Create a temporary client to test the homeserver
+        match Client::builder()
+            .homeserver_url(homeserver_url)
+            .build()
+            .await
+        {
+            Ok(client) => {
+                // Try to get the server's capabilities or well-known info
+                match client.get_capabilities().await {
+                    Ok(_) => Ok(true),
+                    Err(e) => {
+                        let error_msg = e.to_string().to_lowercase();
+
+                        // These errors indicate a valid Matrix homeserver
+                        if error_msg.contains("no access token")
+                            || error_msg.contains("auth")
+                            || error_msg.contains("unauthorized")
+                            || error_msg.contains("403")
+                            || error_msg.contains("401")
+                            || error_msg.contains("404")
+                            || error_msg.contains("not found")
+                            || error_msg.contains("capabilities")
+                        {
+                            Ok(true) // Server exists and is a valid Matrix homeserver
+                        } else if error_msg.contains("connection")
+                            || error_msg.contains("timeout")
+                            || error_msg.contains("network")
+                            || error_msg.contains("dns")
+                        {
+                            Err(eyre!("Homeserver not reachable: network error"))
+                        } else {
+                            Err(eyre!("Homeserver validation failed: {}", e))
+                        }
+                    }
+                }
+            }
+            Err(e) => Err(eyre!("Failed to create client for homeserver: {}", e)),
+        }
     }
 
     /// Dummy login function - replace with actual Matrix SDK authentication
