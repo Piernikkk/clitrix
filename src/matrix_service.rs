@@ -1,10 +1,22 @@
+use chrono::{DateTime, Utc};
 use color_eyre::{Result, eyre::eyre};
 use matrix_sdk::{
     Client, RoomState,
-    ruma::{OwnedRoomId, events::room::message::RoomMessageEventContent},
+    ruma::{
+        OwnedRoomId, UInt,
+        events::{
+            AnySyncTimelineEvent, SyncMessageLikeEvent,
+            room::message::{MessageType, RoomMessageEventContent},
+        },
+        uint,
+    },
 };
 
-use crate::models::{message::Message, room::Room, user::User};
+use crate::models::{
+    message::{Message, MessageContent},
+    room::Room,
+    user::User,
+};
 
 #[derive(Debug, Clone)]
 pub struct MatrixService {
@@ -163,21 +175,102 @@ impl MatrixService {
         Ok(())
     }
 
-    pub async fn get_messages(&self, room_id: &OwnedRoomId, _limit: u32) -> Result<Vec<Message>> {
+    pub async fn get_messages(&self, room_id: &OwnedRoomId, limit: u32) -> Result<Vec<Message>> {
         let client = match &self.client {
             Some(client) => client,
             None => return Err(eyre!("Client is not initialized")),
         };
 
-        let _room = client
+        let room = client
             .get_room(room_id)
             .ok_or_else(|| eyre!("Room not found"))?;
 
-        // TODO: Implement proper message fetching using Matrix SDK timeline API
-        // For now, return empty messages list
-        // The timeline API requires more complex setup with proper sync and state management
+        let mut messages = Vec::new();
+        let user_id = self.user.as_ref().map(|u| u.user_id.as_str());
 
-        let messages = Vec::new();
+        // Use the room's messages() method to fetch message history
+        let mut options = matrix_sdk::room::MessagesOptions::backward();
+        options.limit = UInt::new(limit as u64).unwrap_or(uint!(50));
+
+        match room.messages(options).await {
+            Ok(batch) => {
+                for timeline_event in batch.chunk {
+                    // Process message based on event kind
+                    let message_data = match &timeline_event.kind {
+                        matrix_sdk::deserialized_responses::TimelineEventKind::UnableToDecrypt { .. } => {
+                            continue;
+                        }
+                        matrix_sdk::deserialized_responses::TimelineEventKind::Decrypted(_decrypted) => {
+                            // Skip decrypted events for now - they require more complex handling
+                            continue;
+                        }
+                        matrix_sdk::deserialized_responses::TimelineEventKind::PlainText { event } => {
+                            // Handle plaintext events
+                            match event.deserialize() {
+                                Ok(AnySyncTimelineEvent::MessageLike(
+                                    matrix_sdk::ruma::events::AnySyncMessageLikeEvent::RoomMessage(
+                                        SyncMessageLikeEvent::Original(original),
+                                    ),
+                                )) => Some((
+                                    original.sender,
+                                    original.content,
+                                    original.origin_server_ts,
+                                    original.event_id,
+                                )),
+                                _ => None,
+                            }
+                        }
+                    };
+
+                    if let Some((sender, content_data, timestamp, event_id)) = message_data {
+                        let sender_display_name = room
+                            .get_member(&sender)
+                            .await
+                            .ok()
+                            .flatten()
+                            .and_then(|m| m.display_name().map(|n| n.to_string()));
+
+                        let is_own_message = user_id.map_or(false, |uid| uid == sender.as_str());
+
+                        let content = match &content_data.msgtype {
+                            MessageType::Text(text) => MessageContent::Text(text.body.clone()),
+                            MessageType::Emote(emote) => MessageContent::Emote(emote.body.clone()),
+                            MessageType::Notice(notice) => {
+                                MessageContent::Notice(notice.body.clone())
+                            }
+                            MessageType::Image(image) => MessageContent::Image {
+                                body: image.body.clone(),
+                                url: format!("{:?}", image.source),
+                            },
+                            MessageType::File(file) => MessageContent::File {
+                                body: file.body.clone(),
+                                url: format!("{:?}", file.source),
+                            },
+                            _ => MessageContent::Unknown,
+                        };
+
+                        let ts = timestamp.as_secs();
+                        let datetime =
+                            DateTime::<Utc>::from_timestamp(ts.into(), 0).unwrap_or_else(Utc::now);
+
+                        messages.push(Message::new(
+                            event_id.to_string(),
+                            sender,
+                            sender_display_name,
+                            content,
+                            datetime,
+                            is_own_message,
+                        ));
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(eyre!("Failed to fetch messages: {}", e));
+            }
+        }
+
+        // Reverse to show oldest first (messages() returns newest first)
+        messages.reverse();
 
         Ok(messages)
     }

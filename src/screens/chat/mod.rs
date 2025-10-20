@@ -42,6 +42,13 @@ const COLORS: Colors = Colors {
 
 pub struct ChatScreen;
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum FocusMode {
+    RoomList,
+    Messages,
+    Input,
+}
+
 #[derive(Debug)]
 pub struct ChatScreenState {
     pub rooms: Vec<Room>,
@@ -52,7 +59,7 @@ pub struct ChatScreenState {
     pub room_list_scroll_offset: usize,
     pub is_loading: bool,
     pub error_message: Option<String>,
-    pub input_focused: bool,
+    pub focus_mode: FocusMode,
 }
 
 impl Default for ChatScreenState {
@@ -61,17 +68,28 @@ impl Default for ChatScreenState {
             rooms: Vec::new(),
             selected_room_index: 0,
             messages: Vec::new(),
-            message_input: TextInputState::new(String::new(), true),
+            message_input: TextInputState::new(String::new(), false),
             message_scroll_offset: 0,
             room_list_scroll_offset: 0,
             is_loading: false,
             error_message: None,
-            input_focused: true,
+            focus_mode: FocusMode::RoomList,
         }
     }
 }
 
 impl ChatScreenState {
+    pub fn cycle_focus(&mut self) {
+        self.focus_mode = match self.focus_mode {
+            FocusMode::RoomList => FocusMode::Messages,
+            FocusMode::Messages => FocusMode::Input,
+            FocusMode::Input => FocusMode::RoomList,
+        };
+
+        // Update input focused state
+        self.message_input.is_focused = self.focus_mode == FocusMode::Input;
+    }
+
     pub fn get_selected_room(&self) -> Option<&Room> {
         self.rooms.get(self.selected_room_index)
     }
@@ -92,16 +110,12 @@ impl ChatScreenState {
         }
     }
 
-    pub fn scroll_messages_up(&mut self) {
-        if self.message_scroll_offset > 0 {
-            self.message_scroll_offset -= 1;
-        }
+    pub fn scroll_messages_up(&mut self, page_size: usize) {
+        self.message_scroll_offset = self.message_scroll_offset.saturating_sub(page_size);
     }
 
-    pub fn scroll_messages_down(&mut self, max_offset: usize) {
-        if self.message_scroll_offset < max_offset {
-            self.message_scroll_offset += 1;
-        }
+    pub fn scroll_messages_down(&mut self, page_size: usize, max_offset: usize) {
+        self.message_scroll_offset = (self.message_scroll_offset + page_size).min(max_offset);
     }
 }
 
@@ -144,14 +158,22 @@ impl ChatScreen {
             })
             .collect();
 
+        let is_focused = state.chat_screen.focus_mode == FocusMode::RoomList;
+        let border_color = if is_focused {
+            COLORS.selected_room
+        } else {
+            COLORS.border
+        };
+
         let block = Block::default()
             .borders(Borders::ALL)
             .title("Rooms")
             .title_style(
                 Style::default()
-                    .fg(COLORS.border)
+                    .fg(border_color)
                     .add_modifier(Modifier::BOLD),
-            );
+            )
+            .border_style(Style::default().fg(border_color));
 
         let list = List::new(room_items).block(block);
 
@@ -165,14 +187,22 @@ impl ChatScreen {
             "Chat".to_string()
         };
 
+        let is_focused = state.chat_screen.focus_mode == FocusMode::Messages;
+        let border_color = if is_focused {
+            COLORS.selected_room
+        } else {
+            COLORS.border
+        };
+
         let block = Block::default()
             .borders(Borders::ALL)
             .title(title)
             .title_style(
                 Style::default()
-                    .fg(COLORS.border)
+                    .fg(border_color)
                     .add_modifier(Modifier::BOLD),
-            );
+            )
+            .border_style(Style::default().fg(border_color));
 
         let inner_area = block.inner(area);
         frame.render_widget(block, area);
@@ -186,7 +216,10 @@ impl ChatScreen {
 
         let visible_height = inner_area.height as usize;
         let total_messages = state.chat_screen.messages.len();
-        let scroll_offset = state.chat_screen.message_scroll_offset;
+
+        // Calculate max scroll offset to prevent scrolling past the end
+        let max_scroll = total_messages.saturating_sub(visible_height);
+        let scroll_offset = state.chat_screen.message_scroll_offset.min(max_scroll);
 
         let start_idx = scroll_offset;
         let end_idx = (scroll_offset + visible_height).min(total_messages);
@@ -232,24 +265,37 @@ impl ChatScreen {
     }
 
     fn render_message_input(&self, frame: &mut Frame, area: Rect, state: &AppState) {
+        let is_focused = state.chat_screen.focus_mode == FocusMode::Input;
         let input = TextInput::new(
             &state.chat_screen.message_input.value,
             state.chat_screen.message_input.cursor_position,
             "Message",
             "Type your message...",
             false,
-            state.chat_screen.input_focused,
+            is_focused,
         );
 
         frame.render_widget(input, area);
     }
 
-    fn render_controls(&self, frame: &mut Frame, area: Rect, _state: &AppState) {
+    fn render_controls(&self, frame: &mut Frame, area: Rect, state: &AppState) {
+        let mode_text = match state.chat_screen.focus_mode {
+            FocusMode::RoomList => "Focus: ROOM LIST",
+            FocusMode::Messages => "Focus: MESSAGES",
+            FocusMode::Input => "Focus: INPUT",
+        };
+
         let instructions = vec![
-            Line::from(
-                "↑/↓ - Select room | PgUp/PgDn - Scroll messages | Tab - Toggle input focus",
-            ),
-            Line::from("Enter - Send message | ESC - Exit"),
+            Line::from(vec![
+                Span::styled(
+                    mode_text,
+                    Style::default()
+                        .fg(COLORS.selected_room)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(" | Tab - Cycle focus | ↑/↓ - Navigate | PgUp/PgDn - Scroll messages"),
+            ]),
+            Line::from("Enter - Send message (Input mode) / Select room (Room mode) | ESC - Exit"),
         ];
 
         let instructions_paragraph = Paragraph::new(instructions)
@@ -307,65 +353,102 @@ impl ScreenHandler for ChatScreen {
         match key.code {
             KeyCode::Esc => None,
             KeyCode::Tab => {
-                state.chat_screen.input_focused = !state.chat_screen.input_focused;
-                state.chat_screen.message_input.is_focused = state.chat_screen.input_focused;
+                state.chat_screen.cycle_focus();
                 Some(Screen::Chat)
             }
             KeyCode::Up => {
-                if !state.chat_screen.input_focused {
-                    state.chat_screen.select_previous_room();
-
-                    // Load messages for the newly selected room
-                    if let Some(room) = state.chat_screen.get_selected_room() {
-                        let room_id = room.room_id.clone();
-                        match state.matrix_service.get_messages(&room_id, 100).await {
-                            Ok(messages) => {
-                                state.chat_screen.messages = messages;
-                                state.chat_screen.message_scroll_offset = 0;
-                                state.chat_screen.error_message = None;
-                            }
-                            Err(e) => {
-                                state.chat_screen.error_message =
-                                    Some(format!("Failed to load messages: {}", e));
+                match state.chat_screen.focus_mode {
+                    FocusMode::RoomList => {
+                        state.chat_screen.select_previous_room();
+                        // Load messages for the newly selected room
+                        if let Some(room) = state.chat_screen.get_selected_room() {
+                            let room_id = room.room_id.clone();
+                            match state.matrix_service.get_messages(&room_id, 100).await {
+                                Ok(messages) => {
+                                    state.chat_screen.messages = messages;
+                                    state.chat_screen.message_scroll_offset = 0;
+                                    state.chat_screen.error_message = None;
+                                }
+                                Err(e) => {
+                                    state.chat_screen.error_message =
+                                        Some(format!("Failed to load messages: {}", e));
+                                }
                             }
                         }
+                    }
+                    FocusMode::Messages => {
+                        // Scroll messages up by 1 line
+                        state.chat_screen.scroll_messages_up(1);
+                    }
+                    FocusMode::Input => {
+                        // Input handles its own navigation
                     }
                 }
                 Some(Screen::Chat)
             }
             KeyCode::Down => {
-                if !state.chat_screen.input_focused {
-                    state.chat_screen.select_next_room();
-
-                    // Load messages for the newly selected room
-                    if let Some(room) = state.chat_screen.get_selected_room() {
-                        let room_id = room.room_id.clone();
-                        match state.matrix_service.get_messages(&room_id, 100).await {
-                            Ok(messages) => {
-                                state.chat_screen.messages = messages;
-                                state.chat_screen.message_scroll_offset = 0;
-                                state.chat_screen.error_message = None;
-                            }
-                            Err(e) => {
-                                state.chat_screen.error_message =
-                                    Some(format!("Failed to load messages: {}", e));
+                match state.chat_screen.focus_mode {
+                    FocusMode::RoomList => {
+                        state.chat_screen.select_next_room();
+                        // Load messages for the newly selected room
+                        if let Some(room) = state.chat_screen.get_selected_room() {
+                            let room_id = room.room_id.clone();
+                            match state.matrix_service.get_messages(&room_id, 100).await {
+                                Ok(messages) => {
+                                    state.chat_screen.messages = messages;
+                                    state.chat_screen.message_scroll_offset = 0;
+                                    state.chat_screen.error_message = None;
+                                }
+                                Err(e) => {
+                                    state.chat_screen.error_message =
+                                        Some(format!("Failed to load messages: {}", e));
+                                }
                             }
                         }
+                    }
+                    FocusMode::Messages => {
+                        // Scroll messages down by 1 line
+                        let visible_height = 20; // Approximate
+                        let max_offset = state
+                            .chat_screen
+                            .messages
+                            .len()
+                            .saturating_sub(visible_height);
+                        state.chat_screen.scroll_messages_down(1, max_offset);
+                    }
+                    FocusMode::Input => {
+                        // Input handles its own navigation
                     }
                 }
                 Some(Screen::Chat)
             }
             KeyCode::PageUp => {
-                state.chat_screen.scroll_messages_up();
+                if state.chat_screen.focus_mode == FocusMode::Messages {
+                    // Scroll up by page (estimate 10 lines per page for responsiveness)
+                    let page_size = 10;
+                    state.chat_screen.scroll_messages_up(page_size);
+                }
                 Some(Screen::Chat)
             }
             KeyCode::PageDown => {
-                let max_offset = state.chat_screen.messages.len().saturating_sub(1);
-                state.chat_screen.scroll_messages_down(max_offset);
+                if state.chat_screen.focus_mode == FocusMode::Messages {
+                    // Calculate proper max offset based on visible area
+                    // We need at least message count - visible height
+                    let page_size = 10;
+                    let visible_height = 20; // Approximate, will be clamped in render anyway
+                    let max_offset = state
+                        .chat_screen
+                        .messages
+                        .len()
+                        .saturating_sub(visible_height);
+                    state
+                        .chat_screen
+                        .scroll_messages_down(page_size, max_offset);
+                }
                 Some(Screen::Chat)
             }
             KeyCode::Enter => {
-                if state.chat_screen.input_focused {
+                if state.chat_screen.focus_mode == FocusMode::Input {
                     let message = state.chat_screen.message_input.value.trim().to_string();
 
                     if !message.is_empty() {
@@ -395,11 +478,13 @@ impl ScreenHandler for ChatScreen {
                             }
                         }
                     }
+                } else if state.chat_screen.focus_mode == FocusMode::RoomList {
+                    // Enter on room list could also load the room's messages (already loaded on selection)
                 }
                 Some(Screen::Chat)
             }
             _ => {
-                if state.chat_screen.input_focused {
+                if state.chat_screen.focus_mode == FocusMode::Input {
                     state.chat_screen.message_input.handle_key_event(key);
                 }
                 Some(Screen::Chat)
