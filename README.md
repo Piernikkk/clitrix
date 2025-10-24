@@ -4,7 +4,7 @@ Simple terminal matrix client
 
 ## Demo video:
 
-https://youtu.be/jkgMbvZ5868
+[![](https://markdown-videos-api.jorgenkh.no/youtube/jkgMbvZ5868)](https://youtu.be/jkgMbvZ5868)
 
 ## Features:
 
