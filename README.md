@@ -2,7 +2,11 @@
 
 Simple terminal matrix client
 
-## Features
+## Demo video:
+
+https://youtu.be/jkgMbvZ5868
+
+## Features:
 
 ### Working:
 
